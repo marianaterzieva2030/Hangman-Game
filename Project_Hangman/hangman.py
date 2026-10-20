@@ -14,21 +14,27 @@ class Game:
     def __init__(self, user_id, mode):
         self.user = session.query(User).filter_by(id=user_id).first()
         self.mode = mode
-        self.word = ''
-        self.mystery_word = ''
-        self.definition = ''
         self.used_letters = set()
 
-        self.guesses_left = 0
-        self.to_guess = set()
         self.hint_used = False
         self.word_guessed = False
 
+    def set_word(self, word, definition):
+        self.word = word.lower()
+        self.definition = definition
+        self.mystery_word = '-' * len(self.word)
+        self.to_guess = set(self.word)
+        self.guesses_left = GUESSES_START_COUNT
+
     def guess_(self, letter, hint_points, no_hint_points):
-        if re.search(r'[A-Z]', letter):
-            letter = letter.lower()
-        elif re.search(r'[^a-zA-z]', letter):
+        """Helper function for guess()"""
+        letter = letter.lower() if isinstance(letter, str) else ''
+        if len(letter) != 1 or not letter.isalpha():
             return False
+
+        if self.word_guessed or self.guesses_left <= 0 or letter in self.used_letters:
+            return False
+        
         self.guesses_left -= 1
         self.used_letters.add(letter)
 
@@ -36,7 +42,7 @@ class Game:
             self.to_guess.remove(letter)
             self.update_mystery_word(letter)
             if len(self.to_guess) == 0:
-                self.word_guessed = True
+                self.word_guessed = True    
                 if self.hint_used:
                     self.user.points += hint_points
                 else:
@@ -51,9 +57,10 @@ class Game:
         return self.guess_(letter, POINTS_WITH_HINT, POINTS_NO_HINT)
     
     def use_hint(self):
+        if self.hint_used or self.word_guessed or self.guesses_left <= 0:
+            return
         self.hint_used = True
         self.guesses_left = min(self.guesses_left, len(self.to_guess))
-        print(self.definition)
     
     def update_mystery_word(self, letter):
         for i in range(len(self.word)):
@@ -66,17 +73,11 @@ class Challenge(Game):
 
     def __init__(self, user_id, word, definition):
         super().__init__(user_id, 'Challenge')
-        if re.search(r'[A-Z]', word):
-            word = word.lower()
-        elif re.search(r'[^a-zA-z]', word):
-            word = CHALLENGE_INVALID_WORD
-            definition = CHALLENGE_INVALID_HINT
-        self.word = word
-        self.mystery_word = '-' * len(self.word)
-        self.definition = definition
-
-        self.to_guess = set(self.word)
-        self.guesses_left = GUESSES_START_COUNT
+        for letter in word:
+            if not letter.isalpha():
+                word = CHALLENGE_INVALID_WORD
+                definition = CHALLENGE_INVALID_HINT
+        self.set_word(word, definition)
     
 
 class Zen(Game):
@@ -85,12 +86,7 @@ class Zen(Game):
     def __init__(self, user_id):
         super().__init__(user_id, 'Zen')
         generator = WordGenerator()
-        self.word = generator.word
-        self.mystery_word = '-' * len(self.word)
-        self.definition = generator.definition
-
-        self.to_guess = set(self.word)
-        self.guesses_left = GUESSES_START_COUNT
+        self.set_word(generator.word, generator.definition)
 
 
 class Competition(Game):
@@ -99,52 +95,4 @@ class Competition(Game):
     def __init__(self, user_id):
         super().__init__(user_id, 'Competition')
         generator = WordGenerator()
-        self.word = generator.word
-        self.mystery_word = '-' * len(self.word)
-        self.definition = generator.definition
-
-        self.to_guess = set(self.word)
-        self.guesses_left = GUESSES_START_COUNT
-    
-
-
-# def replace_letters(source, word, letter):
-#     for i in range(len(source)):
-#         if source[i] == letter:
-#             word = word[:i] + letter + word[i + 1:]
-#     return word
-
-
-# game = Challenge(1, 'бостан', 'Диня; Място, където се садят дини.')
-# mystery_word = '-' * len(game.word)
-
-# print('Game started!')
-# print(mystery_word)
-
-# letter = input('Enter your guess: ')
-# if (game.guess(letter)):
-#     mystery_word = replace_letters(game.word, mystery_word, letter)
-#     print(mystery_word)
-# print(f'Guesses left: {game.guesses_left}')
-
-# while game.guesses_left > 0:
-#     letter = input('Enter your guess: ')
-#     if letter == 'Q':
-#         break
-
-#     if letter == 'H': # hint
-#         game.use_hint()
-#         letter = input('Enter your guess: ')
-#         continue
-
-#     if (game.guess(letter)):
-#         mystery_word = replace_letters(game.word, mystery_word, letter)
-#         print(mystery_word)
-#         if game.word_guessed:
-#             print('You guessed the word!')
-#             session.commit()
-#             break
-#     print(f'Guesses left: {game.guesses_left}')
-
-# print(game.word)
-# print(f'User {game.user.auth.username} points: {game.user.points}')
+        self.set_word(generator.word, generator.definition)

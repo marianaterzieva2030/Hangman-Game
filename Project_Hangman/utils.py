@@ -669,7 +669,6 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
         if guess_made and game.guesses_left > 0:
 
             if letter not in game.used_letters:
-                game.update_mystery_word(letter)
                 game.guess(letter)
 
             guess_made = False
