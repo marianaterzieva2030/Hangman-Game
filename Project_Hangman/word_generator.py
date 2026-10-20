@@ -3,48 +3,73 @@ import re
 import random
 
 WORDS = []
-URL_REQUEST = 'https://api.dictionaryapi.dev/api/v2/entries/en/'
+URL_REQUEST = 'https://freedictionaryapi.com/api/v1/entries/en/'
 ERROR_MESSAGE = 'No definition found. Better luck next time!'
 
 with open('english_words.txt', 'r') as file:
     for line in file:
-        if line.count(' ') or line.count('-') or bool(re.search(r'\d', line)):
+        word = line.strip()
+        if ' ' in word or '-' in word or bool(re.search(r'\d', word)):
             continue
-        if len(line) <= 10:
-            WORDS.append(line[0:len(line) - 1])
+        if len(word) in range(3, 10):
+            WORDS.append(word)
 
 
 class WordGenerator:
     """Random word generator."""
 
     def __init__(self):
-        self.word = self.generate_word()
-        self.definition = self.get_definition()
-        self.validate_definition()
-    
+        self.word = None
+        self.definition = ERROR_MESSAGE
+        self.generate_valid_word()
+
     def generate_word(self):
         rand_index = random.randint(0, len(WORDS) - 1)
         return WORDS[rand_index]
     
     def get_definition(self):
         url = URL_REQUEST + self.word
-        response = requests.get(url)
-        data = response.json()
-        meanings = None
         try:
-            meanings = data[0]['meanings']
-        except KeyError:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            # The API returns a dictionary
+            entries = data.get('entries', [])
+
+            for entry in entries:
+                senses = entry.get('senses', [])
+                for sense in senses:
+                    definition = sense.get('definition')
+
+                    if definition:
+                        return definition
             return ERROR_MESSAGE
         
-        first_definition = meanings[0]['definitions'][0]['definition']
-        return first_definition
+        except (requests.exceptions.RequestException, 
+                ValueError) as error:
+            print(f'API request failed for "{self.word}": {error}')
+            return ERROR_MESSAGE
     
-    def validate_definition(self):
-        while self.definition == ERROR_MESSAGE:
+    def generate_valid_word(self):
+        # Avoid an infinite loop if many words don't have definitions.
+        max_attempts = min(20, len(WORDS))
+
+        for _ in range(max_attempts):
             self.word = self.generate_word()
             self.definition = self.get_definition()
 
+            if self.definition != ERROR_MESSAGE:
+                return
 
+        self.word = None
+        self.definition = ERROR_MESSAGE
+
+
+# Code for testing purposes:
 # generator = WordGenerator()
-# print(f'word: {generator.word}')
-# print(f'definition: {generator.definition}')
+# if generator.word is not None:
+#     print(f'word: {generator.word}')
+#     print(f'definition: {generator.definition}')
+# else:
+#     print('Failed to generate a valid word with a definition.')
