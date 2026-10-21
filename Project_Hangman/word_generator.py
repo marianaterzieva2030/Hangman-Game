@@ -1,17 +1,16 @@
 import requests
-import re
 import random
+from constants import BASE_DIR
 
+WORDS_FILE = BASE_DIR / 'english_words.txt'
 WORDS = []
 URL_REQUEST = 'https://freedictionaryapi.com/api/v1/entries/en/'
 ERROR_MESSAGE = 'No definition found. Better luck next time!'
 
-with open('english_words.txt', 'r') as file:
+with open(WORDS_FILE, 'r', encoding='utf-8') as file:
     for line in file:
-        word = line.strip()
-        if ' ' in word or '-' in word or bool(re.search(r'\d', word)):
-            continue
-        if len(word) in range(3, 10):
+        word = line.strip().lower()
+        if word.isalpha() and len(word) in range(3, 10):
             WORDS.append(word)
 
 
@@ -52,7 +51,7 @@ class WordGenerator:
             return ERROR_MESSAGE
     
     def generate_valid_word(self):
-        # Avoid an infinite loop if many words don't have definitions.
+        # Avoid an infinite loop if many words don't have definitions
         max_attempts = min(20, len(WORDS))
 
         for _ in range(max_attempts):
