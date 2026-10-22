@@ -1,20 +1,29 @@
 from db import session, User, FriendChallenge
 
-user1 = User("mariana.terzieva", "lolo")
-user2 = User("velina.terzieva", "op")
-user3 = User("tedie.terzieva", "sql")
-user4 = User("angel.terziev", "milan")
+def seed():
+    """Seed the database with initial data."""
+    if session.query(User).count() > 0:
+        print('Database is seeded already.')
+        return
+    user1 = User("mariana.terzieva", "lolo")
+    user2 = User("christina.aguilera", "lala")
+    user3 = User("tom_cruise", "maverick")
+    user4 = User("lionel.messi", "barcelona")
 
-user1.friends.append(user2)
-user1.friends.append(user3)
-user2.friends.append(user1) # circular dependency error fixed
+    session.add_all([user1, user2, user3, user4])
+    session.flush() # flush assigns IDs without committing
 
-user1.challenges_list.append(FriendChallenge(2, 'бостан', 'диня; нива за дини'))
+    user1.add_friend(user2)
+    user1.add_friend(user3)
+    user1.challenges_list.append(
+        FriendChallenge(user2.id, 'бостан', 'диня; нива за дини'))
 
-session.add_all([user1, user2, user3, user4])
-session.commit()
+    session.commit()
 
-print(f"{user1.friends = }")
-print(f"{user2.friends = }")
-print(f"{user3.friends = }")
-print(f"{user4.friends = }")
+    for user in (user1, user2, user3, user4):
+        print(f"{user.auth.username} has {len(user.friends)} friends and {len(user.challenges_list)} challenges.")
+
+
+if __name__ == '__main__':
+    seed()
+    session.remove()
