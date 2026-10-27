@@ -1,6 +1,6 @@
 import pygame
-from network import Network, NO_CHALLENGES_MSG
-from hangman import *
+from constants import MODES, LOGGED_IN_MODES, NO_CHALLENGES_MSG, SERVER_HOST, SERVER_PORT
+from network import Network
 from utils import *
 
 # game loop
@@ -15,17 +15,15 @@ def main():
     friend_active, word_active, hint_active = (False, False, False)
      
     game = None
-    guess_made = False
     is_signed_out = False
 
     running = True
-    net = Network("192.168.1.182", 9999)
+    net = Network(SERVER_HOST, SERVER_PORT)
     window.fill(WINDOW_COLOUR)
     mode = MODES['start'] # showcase start screen
 
     while running:
         mouse = pygame.mouse.get_pos()
-        letter = ''
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -33,12 +31,14 @@ def main():
                 pygame.quit()
                 break
             if event.type == pygame.KEYDOWN:
-                letter = event.unicode # for play mode later
 
                 if mode == MODES['play']:
-                    guess_made = True
+                    if (isinstance(game, GameState) and not game.is_over and event.unicode.isalpha()):
+                        error = net.guess(game, event.unicode)
+                        if error:
+                            status_message = error
 
-                if username_active:
+                elif username_active:
                     if event.key == pygame.K_RETURN:
                         username_active = False
                     elif event.key == pygame.K_BACKSPACE:
@@ -50,21 +50,20 @@ def main():
                 elif password_active:
                     if event.key == pygame.K_RETURN:
                         password_active = False
-                        net.connect() # trying to connect to server
-                        if mode == MODES['login']:
-                            login_info = net.send([username, password]) 
-                            if net.recv_login_user_info(login_info):
+                        if not username.strip() or not password:
+                            status_message = 'Enter a username and a password.'
+                        else:
+                            if mode == MODES['login']:
+                                draw_loading('Logging in...')
+                                error = net.login(username.strip(), password)
+                            else:
+                                draw_loading('Registering...')
+                                error = net.register(username.strip(), password)
+                            if error is None:
                                 status_message = ''
                                 mode = MODES['home']
                             else:
-                                status_message = 'Incorrect username or password.'
-                        elif mode == MODES['register']:
-                            register_info = net.send([username, password])
-                            if net.register_user(register_info):
-                                status_message = ''
-                                mode = MODES['home']
-                            else:
-                                status_message = 'This username is already taken.'
+                                status_message = error
                     elif event.key == pygame.K_BACKSPACE:
                         password = password[:-1]
                         password_dots = password_dots[:-1]
@@ -94,11 +93,8 @@ def main():
                 elif hint_active:
                     if event.key == pygame.K_RETURN:
                         hint_active = False
-                        challenge_info = net.send([friend_username, ch_word, ch_hint]) 
-                        if net.send_challenge(challenge_info):
-                            status_message = 'Successfully sent to friend!'
-                        else:
-                            status_message = 'No such friend in friend list.'
+                        error = net.send_challenge(friend_username.strip(), ch_word, ch_hint)
+                        status_message = 'Successfully sent to friend!' if error is None else error
                     elif event.key == pygame.K_BACKSPACE:
                         ch_hint = ch_hint[:-1]
                         status_message = ''
@@ -129,8 +125,13 @@ def main():
             game = None
             option = draw_game_page(mode, event, mouse)
             if isinstance(option, str):
-                game = net.create_game(option)
-                mode = MODES['play']
+                draw_loading('Finding a word...')
+                game = net.new_game(option) # GameState, or an error string
+                if isinstance(game, GameState) or game == NO_CHALLENGES_MSG:
+                    mode = MODES['play']
+                else:
+                    status_message = game # could be "Connection lost."
+                    game = None
             else:
                 mode = option
         
@@ -167,7 +168,12 @@ def main():
 
 
         elif mode == MODES['play']:
-            mode, guess_made = draw_play(mode, event, mouse, game, letter, guess_made)
+            mode, hint_clicked = draw_play(mode, event, mouse, game)
+            if (hint_clicked and isinstance(game, GameState) 
+                and not game.hint_used and not game.is_over):
+                error = net.hint(game)
+                if error:
+                    status_message = error
         
         elif mode == MODES['leaderboard']:
             leaderboard_list = net.get_leaderboard()

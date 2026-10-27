@@ -19,6 +19,16 @@ class Game:
         self.hint_used = False
         self.word_guessed = False
 
+    @property
+    def is_over(self): 
+        return self.word_guessed or self.guesses_left <= 0
+        
+    @property
+    def points_earned(self):
+        if self.mode == 'Zen' or not self.word_guessed: 
+            return 0
+        return POINTS_WITH_HINT if self.hint_used else POINTS_NO_HINT
+
     def set_word(self, word, definition):
         self.word = word.lower()
         self.definition = definition

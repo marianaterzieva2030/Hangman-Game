@@ -1,123 +1,140 @@
+import itertools
 import socket
-import pickle
-from db import *
-from hangman import *
 
-RECV_FAILED_MSG = 'Failed to receive data from client.'
-SEND_FAILED_MSG = 'Failed to send to server.'
-NO_CHALLENGES_MSG = 'No challenges yet...'
+from constants import NO_CHALLENGES_MSG
+from game_state import GameState
+from protocol import send_message, recv_message
+
+CONNECT_TIMEOUT = 5
+DEFAULT_TIMEOUT = 5
+ACTION_TIMEOUTS = {'new_game': 15}       # must exceed the server's worst case (~10 s, Pitfall 1)
+
 
 class Network:
-    """A class dealing with connections from the server."""
-    def __init__(self, server, port):
-        self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server = server #"192.168.1.148"
-        self.port = port #9999
-        self.addr = (self.server, self.port)
-        self.user = None
+    """Thin client for the hangman server. Holds one socket and the login state.
+
+    Not thread-safe: call it only from the pygame main thread.
+    """
+
+    def __init__(self, host, port):
+        self.addr = (host, port)
+        self.sock = None
+        self.username = None
+        self.points = None
+        self._ids = itertools.count(1)
+
+    @property
+    def logged_in(self):
+        return self.sock is not None and self.username is not None
 
     def connect(self):
-        """Connect to client."""
+        """Open a new connection (closing any old one). Returns True on success."""
+        self.close()
         try:
-            self.client.connect(self.addr)
-            return pickle.loads(self.client.recv(4096))
-        except:
-            return RECV_FAILED_MSG
-
-    def send(self, data):
-        try:
-            self.client.sendall(pickle.dumps(data))
-            return pickle.loads(self.client.recv(4096))
-        except socket.error as e:
-            print(e)
-            return SEND_FAILED_MSG
-
-    def recv_login_user_info(self, info):
-        if info == RECV_FAILED_MSG or info == SEND_FAILED_MSG:
+            self.sock = socket.create_connection(self.addr, timeout=CONNECT_TIMEOUT)
+            return True
+        except OSError:
+            self.sock = None
             return False
-        if isinstance(info, list):
-            user_auth = session.query(UserAuth).filter_by(username=info[0]).first()
-            if isinstance(user_auth, type(None)):
-                return False
-            if user_auth.check_password(info[1]):
-                self.user = user_auth.user
-                return True
-        return False
-    
-    def register_user(self, info):
-        if info == RECV_FAILED_MSG or info == SEND_FAILED_MSG:
-            return False
-        if isinstance(info, list):
-            user = session.query(UserAuth).filter_by(username=info[0]).first()
 
-            # no players with this username => OK
-            if isinstance(user, type(None)):
-                print('No other users with this username.')
-                new_user = User(info[0], info[1])
-                session.add(new_user)
-                session.commit()
-                self.user = new_user
-                return True
-        return False
-    
-    def get_user_id(self, username):
-        user_auth = session.query(UserAuth).filter_by(username=username).first()
-        user_id = user_auth.user.id
-        return user_id
+    def close(self):
+        """Drop the socket. Server-side login state dies with it, so forget this login state too."""
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.sock = None
+        self.username = None
+        self.points = None
 
-    def create_game(self, game_mode):
-        if game_mode == 'Zen':
-            return Zen(self.user.id)
-        if game_mode == 'Competition':
-            return Competition(self.user.id)
-        if game_mode == 'Challenge':
-            unused_challenges = [challenge for challenge in self.user.challenges_list if not challenge.is_used]
-            if len(unused_challenges) == 0:
-                return NO_CHALLENGES_MSG
-            for challenge in self.user.challenges_list:
-                if not challenge.is_used:
-                    challenge.is_used = True
-                    session.commit()
-                    return Challenge(self.user.id, challenge.word, challenge.hint)
-        
-    def send_challenge(self, challenge_info):
-        if challenge_info == RECV_FAILED_MSG or challenge_info == SEND_FAILED_MSG:
-            return False
-        if isinstance(challenge_info, list):
-            sender_auth = session.query(UserAuth).filter_by(username=challenge_info[0]).first()
-            sender = sender_auth.user
-            if sender in self.user.friends:
-                print('Found friend!')
-                new_challenge = FriendChallenge(self.user.id, challenge_info[1], challenge_info[2])
-                sender.challenges_list.append(new_challenge)
-                session.commit()
-                return True
-        return False
-    
-    def get_leaderboard(self):
-        """Get the top 5 players."""
-        users_list = session.query(User).order_by(User.points.desc()).all()
-        if len(users_list) < 5:
-            return users_list
-        
-        leaderboard_list = []
-        for i in range(5):
-            leaderboard_list.append(users_list[i])
-        return leaderboard_list
-    
-    def get_friends(self):
-        friend_list = []
-        for friend in self.user.friends:
-            friend_list.append(friend)
-        return friend_list
-    
     def disconnect(self):
-        self.user = None
-    
+        """Sign out and drop the socket."""
+        if self.sock is not None:
+            self.request('logout')
+        self.close()
+
+    def request(self, action, **data):
+        """Send one request to the server and return the reply dict. Never raises."""
+        if self.sock is None and not self.connect():
+            return {'ok': False, 'error': 'Server unavailable.', 'connection_lost': True}
+
+        req_id = next(self._ids)
+        try:
+            self.sock.settimeout(ACTION_TIMEOUTS.get(action, DEFAULT_TIMEOUT))
+            send_message(self.sock, {'action': action, 'id': req_id, **data})
+            reply = recv_message(self.sock)
+            if not isinstance(reply, dict):
+                raise ValueError('Reply is not an object.')
+            if 'id' not in reply and reply.get('ok') is False:
+                # a notice the server sends on its own, e.g. "Server is full."
+                self.close()
+                reply['connection_lost'] = True
+                return reply
+            if reply.get('id') != req_id:
+                raise ValueError('Reply does not match request.')
+            return reply
+        except (OSError, ValueError): # timeout, reset, bad JSON, bad framing, bad id
+            self.close()
+            return {'ok': False, 'error': 'Connection lost.', 'connection_lost': True}
 
 
-# n = Network()
-# dictionary = {1: 'hi', 2: 'there'}
+    # Wrappers: these replace the old Network methods
+    # A wrapper returns None on success or an error string to show the player
 
-# print(n.send(dictionary))
-# print(n.send("working"))
+    def _auth(self, action, username, password):
+        if not self.connect(): # always use a new connection to log in
+            return 'Server unavailable.'
+        reply = self.request(action, username=username, password=password)
+        if not reply['ok']:
+            return reply['error']
+        self.username = reply['username']
+        self.points = reply['points']
+        return None
+
+    def login(self, username, password):
+        return self._auth('login', username, password)
+
+    def register(self, username, password):
+        return self._auth('register', username, password)
+
+    def new_game(self, mode):
+        """Returns a GameState, or an error string (NO_CHALLENGES_MSG for an empty inbox)."""
+        reply = self.request('new_game', mode=mode)
+        if not reply['ok']:
+            return reply['error']
+        try:
+            return GameState(reply['game'])
+        except KeyError:
+            self.close()
+            return 'Connection lost.'
+
+    def _update_game(self, game, action, **data):
+        reply = self.request(action, **data)
+        if not reply['ok']:
+            return reply['error']
+        try:
+            game.update(reply['game'])
+        except KeyError:
+            self.close()
+            return 'Connection lost.'
+        return None
+
+    def guess(self, game, letter):
+        return self._update_game(game, 'guess', letter=letter)
+
+    def hint(self, game):
+        return self._update_game(game, 'hint')
+
+    def leaderboard(self):
+        """List of {'username', 'points'}, or None on failure."""
+        reply = self.request('leaderboard')
+        return reply.get('users') if reply['ok'] else None
+
+    def friends(self):
+        reply = self.request('friends')
+        return reply.get('friends') if reply['ok'] else None
+
+    def send_challenge(self, friend, word, hint):
+        reply = self.request('send_challenge', friend=friend, word=word, hint=hint)
+        return None if reply['ok'] else reply['error']

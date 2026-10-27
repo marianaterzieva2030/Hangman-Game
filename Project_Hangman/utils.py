@@ -1,24 +1,12 @@
 import pygame
-from hangman import *
-from network import NO_CHALLENGES_MSG
+from constants import MODES, NO_CHALLENGES_MSG, FONT_DIR, IMAGE_DIR
+from game_state import GameState
 
 WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 600
 WINDOW_COLOUR = '#383682'
 BUTTON_COLOUR = '#868fd9'
 HOVER_COLOUR = '#27265c'
-
-MODES = {
-    'start': 0,
-    'login': 1,
-    'register': 2,
-    'home': 3,
-    'game_modes': 4,
-    'leaderboard': 5,
-    'friends': 6,
-    'send_challenge': 7,
-    'play': 8
-}
 
 pygame.init()
 
@@ -408,13 +396,13 @@ def draw_leaderboard(mode, event, mouse, leaderboard_list):
 
     for user in leaderboard_list:
         user_surf = smaller_title.render(
-            user.auth.username,
+            user['username'],
             False,
             'White'
         )
 
         points_surf = smaller_title.render(
-            f'{user.points}',
+            f'{user['points']}',
             False,
             'White'
         )
@@ -448,7 +436,7 @@ def draw_friends_list(mode, event, mouse, friends_list):
 
     for user in friends_list:
         user_surf = smaller_title.render(
-            user.auth.username,
+            user['username'],
             False,
             'White'
         )
@@ -536,23 +524,27 @@ def draw_game_page(mode, event, mouse):
 
     return mode
 
+def draw_loading(message):
+    window.fill(WINDOW_COLOUR)
+    surf = basic_font.render(message, False, 'White')
+    window.blit(surf, surf.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)))
+    pygame.display.update()
 
-def draw_play(mode, event, mouse, game, letter, guess_made):
+def draw_play(mode, event, mouse, game):
     name = ''
+    hint_clicked = False
 
     if game == NO_CHALLENGES_MSG:
         name = 'Challenge'
 
-    elif isinstance(game, Game):
+    elif isinstance(game, GameState):
         name = game.mode
 
     title = title_font.render(name, False, 'White')
-
     window.fill(WINDOW_COLOUR)
 
     if name == 'Zen':
         window.blit(title, (540, 10))
-
     else:
         window.blit(title, (420, 10))
 
@@ -569,25 +561,20 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
     )
 
     if event.type == pygame.MOUSEBUTTONDOWN:
-
         if home_rect.collidepoint(mouse):
             mode = MODES['home']
-
         elif back_rect.collidepoint(mouse):
             mode = MODES['game_modes']
 
     if game == NO_CHALLENGES_MSG:
-
         msg = basic_font.render(
             NO_CHALLENGES_MSG,
             False,
             'White'
         )
-
         window.blit(msg, (400, 280))
 
-    elif isinstance(game, Game):
-
+    elif isinstance(game, GameState):
         mystery_word = guessing_word_font.render(
             game.mystery_word,
             False,
@@ -621,9 +608,8 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
         window.blit(mystery_word, (180, 420))
 
         if game.mode != 'Zen':
-
             points_surf = basic_font.render(
-                f'Points: {game.user.points}',
+                f'Points: {game.points}',
                 False,
                 'White'
             )
@@ -632,30 +618,16 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
 
             window.blit(points_surf, (60, 120))
 
-        if not game.hint_used:
-
-            hint_rect = draw_button(
-                mouse,
-                hint_surf,
-                (160, 500, 140, 60)
-            )
-
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if hint_rect.collidepoint(mouse):
-                    game.use_hint()
-
-        else:
-            draw_wrapped_text(
-                game.definition,
-                bulgarian_font,
-                'White',
-                (30, 500, 1100, 90)
-            )
+        if game.hint_used:
+            draw_wrapped_text(game.definition, bulgarian_font, 'White', (30, 500, 1100, 90))
+        elif not game.is_over: # hidden once the game has ended
+            hint_rect = draw_button(mouse, hint_surf, (160, 500, 140, 60))
+            if event.type == pygame.MOUSEBUTTONDOWN and hint_rect.collidepoint(mouse):
+                hint_clicked = True
 
         padding = 0
 
         for used_letter in game.used_letters:
-
             letter_surf = subtitle_font.render(
                 used_letter,
                 False,
@@ -663,22 +635,10 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
             )
 
             window.blit(letter_surf, (685 + padding, 225))
-
             padding += 35
 
-        if guess_made and game.guesses_left > 0:
-
-            if letter not in game.used_letters:
-                game.guess(letter)
-
-            guess_made = False
-
-        elif game.word_guessed:
-
-            if game.hint_used:
-                points_won = POINTS_WITH_HINT
-            else:
-                points_won = POINTS_NO_HINT
+        if game.word_guessed:
+            points_won = game.points_earned
 
             if game.mode == 'Zen':
                 win_message = 'Yay! You guessed the\nmystery word!'
@@ -693,8 +653,7 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
                 330
             )
 
-        elif game.guesses_left == 0:
-
+        elif game.is_over:
             loss_message_surf = smaller_title.render(
                 f'You failed to guess {game.word} :(',
                 False,
@@ -703,4 +662,4 @@ def draw_play(mode, event, mouse, game, letter, guess_made):
 
             window.blit(loss_message_surf, (660, 330))
 
-    return (mode, guess_made)
+    return (mode, hint_clicked)
