@@ -7,7 +7,7 @@ from protocol import send_message, recv_message
 
 CONNECT_TIMEOUT = 5
 DEFAULT_TIMEOUT = 5
-ACTION_TIMEOUTS = {'new_game': 15}       # must exceed the server's worst case (~10 s, Pitfall 1)
+ACTION_TIMEOUTS = {'new_game': 15}
 
 
 class Network:
@@ -74,7 +74,8 @@ class Network:
             if reply.get('id') != req_id:
                 raise ValueError('Reply does not match request.')
             return reply
-        except (OSError, ValueError): # timeout, reset, bad JSON, bad framing, bad id
+        except (OSError, ValueError) as e: # timeout, reset, bad JSON, bad framing, bad id
+            print('REQUEST FAILED:', action, repr(e))
             self.close()
             return {'ok': False, 'error': 'Connection lost.', 'connection_lost': True}
 
@@ -138,3 +139,7 @@ class Network:
     def send_challenge(self, friend, word, hint):
         reply = self.request('send_challenge', friend=friend, word=word, hint=hint)
         return None if reply['ok'] else reply['error']
+
+    def add_friend(self, username):
+       reply = self.request('add_friend', username=username)
+       return None if reply['ok'] else reply['error']

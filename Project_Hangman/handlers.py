@@ -6,7 +6,7 @@ import time
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from constants import NO_CHALLENGES_MSG
-from db import session, User, UserAuth, FriendsAssociation, FriendChallenge
+from db import session, User, UserAuth, FriendChallenge
 from hangman import Zen, Challenge, Competition
 
 log = logging.getLogger('hangman.handlers')
@@ -18,6 +18,7 @@ MIN_CHALLENGE_WORD_LENGTH = 2
 MAX_CHALLENGE_WORD_LENGTH = 9
 MAX_HINT_LENGTH = 80
 MAX_FAILED_LOGINS = 5
+MAX_FRIENDS = 50
 
 HANDLERS = {} # dict of handler functions
 
@@ -214,15 +215,26 @@ def send_challenge(request, state):
 @action('add_friend')
 @login_required
 def add_friend(request, state):
-    friend_auth = session.query(UserAuth).filter_by(username=text(request, 'username').strip()).first()
-    if friend_auth is None:
-        return fail('No such user.')
-    if not state['user'].add_friend(friend_auth.user):
-        return fail('Already friends, or that is you.')
-    session.commit()
-    return ok()
+    me = state['user']
+    name = text(request, 'username').strip()
 
-def dispatch(request, state):
+    other_auth = session.query(UserAuth).filter_by(username=name).first()
+    if other_auth is None:
+        return fail('No such user.')
+    other = other_auth.user
+
+    if other.id == me.id:
+        return fail("You can't add yourself.")
+    if other in me.friends:
+        return fail('Already friends.')
+    if len(me.friends) >= MAX_FRIENDS:
+        return fail('Friend list is full.')
+
+    me.add_friend(other) # DB add_friend, which is two-way
+    session.commit()
+    return ok(friend=user_summary(other))
+
+def _dispatch(request, state):
     try:
         if not isinstance(request, dict):
             return fail('Invalid request.')
@@ -235,3 +247,9 @@ def dispatch(request, state):
         session.rollback()
         log.exception('Handler failed.')
         return fail('Server error.')
+
+def dispatch(request, state):
+    reply = _dispatch(request, state)
+    if isinstance(request, dict) and 'id' in request:
+        reply['id'] = request['id']
+    return reply
