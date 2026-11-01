@@ -83,10 +83,14 @@ class Challenge(Game):
 
     def __init__(self, user_id, word, definition):
         super().__init__(user_id, 'Challenge')
-        for letter in word:
-            if not letter.isalpha():
-                word = CHALLENGE_INVALID_WORD
-                definition = CHALLENGE_INVALID_HINT
+        if not word:
+            word = CHALLENGE_INVALID_WORD
+            definition = CHALLENGE_INVALID_HINT
+        else:
+            for letter in word:
+                if not letter.isalpha():
+                    word = CHALLENGE_INVALID_WORD
+                    definition = CHALLENGE_INVALID_HINT
         self.set_word(word, definition)
     
 
